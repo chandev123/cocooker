@@ -111,16 +111,16 @@ cocooker
 ```
 
 # 운영체제 및 개발환경
-OS : Ubuntu 22.04.5 LTS
-Middleware : ROS2 Humble
-Language : Python3
-AI : yolo11n
-Database/Network : HTML5
+- OS : Ubuntu 22.04.5 LTS
+- Middleware : ROS2 Humble
+- Language : Python3
+- AI : yolo11n
+- Database/Network : HTML5
 
 # 사용장비 목록
-Manipulator : Doosan Robotics M0609 (6-DoF, Payload 6kg)
-Gripper : modbus gripper DA_v1
-Camera : Intel RealSense D435i(RGB-D Depth Sensing)
+- Manipulator : Doosan Robotics M0609 (6-DoF, Payload 6kg)
+- Gripper : modbus gripper DA_v1
+- Camera : Intel RealSense D435i(RGB-D Depth Sensing)
 
 # 의존성
 [requirements.txt](requirements.txt)
