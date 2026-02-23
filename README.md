@@ -9,6 +9,7 @@
 - 데이터 기반 시스템 신뢰성 검증(Data-Driven System Verification)
 
 # 시스템 설계 및 플로우차트
+- [시연영상](docs/1_min_demo_video.mp4)
 - [시스템 설계](docs/system_architecture.png)
 - [플로우차트](docs/flowchart.png)
 - [워크스페이스](docs/workspace.png)
@@ -138,7 +139,7 @@ ros2 run ui_node ui_node
 cd ./src/ui_node/ui_node
 xdg-open ui_clean.html
 
-# step4. 검증.
+# step4. 검증
 cp ./analysis/notebooks/pick_and_place_pot_yolo_validation.py ./src/kitchen_assistant/kitchen_assistant/legacy/pick_and_place_pot_yolo.py
 ros2 run kitchen_assistant kitchen_cli
 ros2 run ui_node ui_node
