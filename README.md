@@ -9,7 +9,7 @@
 - 데이터 기반 시스템 신뢰성 검증(Data-Driven System Verification)
 
 # 시스템 설계 및 플로우차트
-- [시연영상](docs/1_min_demo_video.mp4)
+- [시연영상](https://github.com/chandev123/cocooker/blob/main/docs/1_min_demo_video.mp4)
 - [시스템 설계](docs/system_architecture.png)
 - [플로우차트](docs/flowchart.png)
 - [워크스페이스](docs/workspace.png)
