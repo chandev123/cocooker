@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CoCooker Control</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 100%;
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2em;
+        }
+
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 0.9em;
+        }
+
+        .status {
+            background: #f0f0f0;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        .status-text {
+            font-size: 1.1em;
+            color: #555;
+            margin-bottom: 10px;
+        }
+
+        .status-indicator {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #95a5a6;
+            margin-left: 10px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-indicator.running {
+            background: #2ecc71;
+        }
+
+        .status-indicator.error {
+            background: #e74c3c;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .button-container {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 25px;
+            font-size: 1.1em;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .start-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .start-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .start-btn:active {
+            transform: translateY(0);
+        }
+
+        .start-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .stop-btn {
+            background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+            color: white;
+        }
+
+        .stop-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(231, 76, 60, 0.4);
+        }
+
+        .stop-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .emergency-btn {
+            background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%);
+            color: white;
+        }
+
+        .emergency-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(241, 196, 15, 0.4);
+        }
+
+        .emergency-btn:disabled {
+            background: #bdc3c7;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .yolo-container {
+            background: #2c3e50;
+            border-radius: 10px;
+            padding: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 1.2em;
+            text-align: center;
+            color: #ecf0f1;
+        }
+
+        .current-object {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #3498db;
+        }
+
+        .spinner {
+            display: none;
+            width: 40px;
+            height: 40px;
+            margin: 20px auto;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        .spinner.active {
+            display: block;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 CoCooker</h1>
+        <p class="subtitle">ROS2 Control Panel</p>
+
+        <div class="status">
+            <div class="status-text">
+                상태: <span id="status">대기 중</span>
+                <span class="status-indicator" id="indicator"></span>
+            </div>
+            <div class="spinner" id="spinner"></div>
+        </div>
+
+        <div class="button-container">
+            <button class="start-btn" id="startBtn" onclick="startPickAndPlace()">
+                ▶ Start
+            </button>
+            <button class="stop-btn" id="stopBtn" onclick="stopPickAndPlace()" disabled>
+                ⏹ Stop
+            </button>
+            <button class="emergency-btn" id="emergencyBtn" onclick="emergencyStop()">
+                ⚠️ Emergency
+            </button>
+        </div>
+
+        <div class="yolo-container">
+            <div>현재 탐지 중인 객체</div>
+            <div class="current-object" id="currentObject">-</div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+
+    <script>
+        // 디버그 로그 함수 (콘솔에만 출력)
+        function debugLog(message) {
+            const timestamp = new Date().toLocaleTimeString('ko-KR');
+            console.log(`[${timestamp}] ${message}`);
+        }
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyAHI5d9VNE4J11ZUiwbLqm1MB3i23bmVuI",
+            authDomain: "cocooker.firebaseapp.com",
+            databaseURL: "https://cocooker-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "cocooker",
+            storageBucket: "cocooker.firebasestorage.app",
+            messagingSenderId: "415362583003",
+            appId: "1:415362583003:web:abef67dbd4cd935ed43ffe",
+            measurementId: "G-S6LV9HB46M"
+        };
+
+        // Firebase 초기화
+        debugLog('Firebase 초기화 시작...');
+        let database;
+        try {
+            const app = firebase.initializeApp(firebaseConfig);
+            database = firebase.database(app);
+            debugLog('✅ Firebase 초기화 완료');
+        } catch (error) {
+            debugLog(`❌ Firebase 초기화 실패: ${error.message}`);
+        }
+
+        let isRunning = false;
+
+        // 명령 전송 함수 (디버깅 강화)
+        function sendCommand(action) {
+            const timestamp = Date.now();
+            const commandData = {
+                action: action,
+                timestamp: timestamp
+            };
+            
+            debugLog(`📤 명령 전송 시도: ${action}`);
+            debugLog(`   타임스탬프: ${timestamp}`);
+            
+            database.ref('commands').push(commandData)
+                .then((ref) => {
+                    debugLog(`✅ 명령 전송 성공 (키: ${ref.key})`);
+                    debugLog(`   데이터: ${JSON.stringify(commandData)}`);
+                })
+                .catch((error) => {
+                    debugLog(`❌ 명령 전송 실패: ${error.message}`);
+                });
+        }
+
+        // 상태 업데이트 함수
+        function updateStatus(status, indicatorClass) {
+            document.getElementById('status').textContent = status;
+            const indicator = document.getElementById('indicator');
+            indicator.className = `status-indicator ${indicatorClass}`;
+        }
+
+        // 현재 탐지 중인 객체를 상태 표시 영역에 업데이트
+        function updateCurrentObject(objectName) {
+            document.getElementById('currentObject').textContent = objectName;
+        }
+
+        // Start 버튼 클릭
+        function startPickAndPlace() {
+            debugLog('🚀 START 버튼 클릭됨');
+            
+            if (isRunning) {
+                debugLog('⚠️ 이미 실행 중');
+                return;
+            }
+
+            isRunning = true;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('emergencyBtn').disabled = false;
+            document.getElementById('spinner').classList.add('active');
+            
+            updateCurrentObject('프로세스 시작 중...');
+            
+            // Firebase에 시작 명령 전송
+            sendCommand('start');
+        }
+
+        // Stop 버튼 클릭
+        function stopPickAndPlace() {
+            debugLog('🛑 STOP 버튼 클릭됨');
+            
+            if (!isRunning) {
+                debugLog('⚠️ 실행 중이 아님');
+                return;
+            }
+
+            updateCurrentObject('프로세스 중지 중...');
+
+            // Firebase에 중지 명령 전송
+            sendCommand('stop');
+
+            isRunning = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('spinner').classList.remove('active');
+        }
+
+        // Emergency Stop 버튼 클릭
+        function emergencyStop() {
+            debugLog('🚨 EMERGENCY STOP 버튼 클릭됨');
+            
+            updateCurrentObject('비상정지 중...');
+
+            // Firebase에 비상정지 명령 전송
+            sendCommand('emergency_stop');
+
+            isRunning = false;
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+            document.getElementById('emergencyBtn').disabled = true;
+            document.getElementById('spinner').classList.remove('active');
+        }
+
+        // Firebase에서 상태 읽기 (실시간 업데이트)
+        database.ref('status').on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                debugLog(`📊 상태 업데이트: ${data.currentStatus}`);
+                updateStatus(data.currentStatus || '대기 중', data.indicatorClass || '');
+            }
+        });
+
+        // Firebase에서 탐지 중인 객체 상태 읽기 (실시간 업데이트)
+        database.ref('currentObject').on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data && data.name) {
+                debugLog(`🎯 객체 업데이트: ${data.name}`);
+                updateCurrentObject(data.name);
+            }
+        });
+
+        // Firebase commands 모니터링 (디버깅용)
+        database.ref('commands').on('child_added', (snapshot) => {
+            const cmd = snapshot.val();
+            debugLog(`👀 명령 감지됨: ${snapshot.key}`);
+            debugLog(`   내용: ${JSON.stringify(cmd)}`);
+        });
+
+        database.ref('commands').on('child_removed', (snapshot) => {
+            debugLog(`🗑️ 명령 삭제됨: ${snapshot.key}`);
+        });
+
+        // 페이지 로드 시 초기 상태 설정
+        window.onload = function() {
+            debugLog('🌐 페이지 로드 완료');
+            updateStatus('대기 중', '');
+            updateCurrentObject('-');
+            
+            // 현재 commands 데이터 확인
+            database.ref('commands').once('value')
+                .then((snapshot) => {
+                    const data = snapshot.val();
+                    debugLog(`📋 현재 commands 데이터: ${JSON.stringify(data)}`);
+                })
+                .catch((error) => {
+                    debugLog(`❌ commands 읽기 실패: ${error.message}`);
+                });
+        };
+    </script>
+</body>
+</html>

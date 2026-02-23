@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>kitchen_assistant</name>
+  <version>0.1.0</version>
+  <description>Kitchen assistant (legacy scripts wrapped as ROS2 ament_python package).</description>
+  <maintainer email="user@example.com">user</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+
+  <!-- External deps via pip/apt: ultralytics, opencv-python, numpy, scipy, pymodbus -->
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
