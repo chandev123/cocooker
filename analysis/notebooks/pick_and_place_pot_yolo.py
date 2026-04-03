@@ -25,6 +25,7 @@ import sys
 import math
 from pathlib import Path
 import pathlib
+import csv
 
 import cv2
 import numpy as np
@@ -36,7 +37,6 @@ from kitchen_assistant.realsense import ImgNode
 from kitchen_assistant.onrobot import RG
 import DR_init
 from kitchen_assistant.utils import resolve_model_path, resolve_resource_path
-
 
 # -----------------------------
 # User parameters
@@ -219,6 +219,18 @@ class PotHandlePickNode(Node):
         self.last_seen_t = None
 
         self.done_once = False
+        self.fail_dir = "fail_images"
+        os.makedirs(self.fail_dir, exist_ok=True) # 폴더 없으면 생성
+
+        print('gripper1')
+        self.gripper.open_gripper()
+        wait(1.0)
+        print('gripper2')
+        self.gripper.close_gripper()
+        wait(1.0)
+        print('gripper3')
+        self.gripper.open_gripper()
+        print('gripper4')
 
         self.get_logger().info("Ready. Holding condition: handle >= %.1fs" % DETECT_HOLD_SEC)
         self.get_logger().info("This version caches GRIP (base_xyz) BEFORE rotating J6. No GRIP re-detect after rotation.")
@@ -311,9 +323,10 @@ class PotHandlePickNode(Node):
     def detect_handle(self, img: np.ndarray):
         res = self.model(img, conf=CONF_THRES)[0]
         merged_handle = None
+        max_conf = 0.0  # [추가] 최대 신뢰도 저장 변수
 
         if res.masks is None or res.boxes is None:
-            return None, None, None, None, img
+            return None, None, None, None, 0.0, img  # 반환값 개수 변경 (conf 추가)
 
         masks = res.masks.data.cpu().numpy()
         classes = res.boxes.cls.cpu().numpy().astype(int)
@@ -327,6 +340,7 @@ class PotHandlePickNode(Node):
 
             if "handle" in label.lower():
                 merged_handle = mask_bin if merged_handle is None else np.maximum(merged_handle, mask_bin)
+                max_conf = max(max_conf, float(cf))  # [추가] 핸들 신뢰도 갱신
                 color = (0, 0, 255)
             elif "body" in label.lower() or "pot" in label.lower():
                 color = (0, 255, 0)
@@ -336,7 +350,7 @@ class PotHandlePickNode(Node):
             vis = overlay_mask(vis, mask_bin, color=color, alpha=0.25)
 
         if merged_handle is None:
-            return None, None, None, None, vis
+            return None, None, None, None, 0.0, vis
 
         grip_pt, root_pt, direction = compute_grip_from_handle_mask(merged_handle, offset_px=35)
 
@@ -351,8 +365,12 @@ class PotHandlePickNode(Node):
             dir_vec = (direction * 60.0).astype(int)
             arrow_end = (root_pt[0] + int(dir_vec[0]), root_pt[1] + int(dir_vec[1]))
             cv2.arrowedLine(vis, root_pt, arrow_end, (255, 0, 255), 2, tipLength=0.2)
+            
+            # 화면에 신뢰도 표시
+            cv2.putText(vis, f"Conf: {max_conf:.2f}", (10, 120),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
-        return merged_handle, grip_pt, root_pt, direction, vis
+        return merged_handle, grip_pt, root_pt, direction, max_conf, vis
 
     # ---- J6 alignment (open-loop, no re-detect) ----
     def compute_total_j6_delta_deg(self, direction_unit: np.ndarray) -> float:
@@ -400,6 +418,7 @@ class PotHandlePickNode(Node):
 
     # ---- robot action ----
     def pick_sequence(self, base_xyz):
+        print('pick1')
         x, y, z = float(base_xyz[0]), float(base_xyz[1]), float(base_xyz[2])
 
         # Use current orientation AFTER J6 rotation
@@ -409,114 +428,274 @@ class PotHandlePickNode(Node):
         pre = posx([x, y, z + PREAPPROACH_DZ, rx, ry, rz])
         pick = posx([x, y, z - PICK_DZ,        rx, ry, rz])
         retreat = posx([x, y, z + RETREAT_DZ,  rx, ry, rz])
-
+        print('pick2')
         movel(pre, vel=VELOCITY, acc=ACC)
+        print('pick3')
         movel(pick, vel=VELOCITY, acc=ACC)
-
+        print('pick4')
         self.gripper.close_gripper()
         wait(GRIP_WAIT)
 
-        movel(retreat, vel=VELOCITY, acc=ACC)
+        # movel(retreat, vel=VELOCITY, acc=ACC)
 
-        movel(posx([0.0, 0.0, 50.0, 0.0, 0.0, 0.0]), vel=VELOCITY, acc=ACC, 
-          ref=DR_BASE, mod=DR_MV_MOD_REL)
-        wait(0.5)
+        # movel(posx([0.0, 0.0, 50.0, 0.0, 0.0, 0.0]), vel=VELOCITY, acc=ACC, 
+        #   ref=DR_BASE, mod=DR_MV_MOD_REL)
+        # wait(0.5)
 
-        movej([-90.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=VELOCITY, acc=ACC, 
-          mod=DR_MV_MOD_REL)
-        wait(0.5)
+        # movej([-90.0, 0.0, 0.0, 0.0, 0.0, 0.0], vel=VELOCITY, acc=ACC, 
+        #   mod=DR_MV_MOD_REL)
+        # wait(0.5)
 
-        width = self.gripper.get_width()
-        if width > 12 :
-            print(f'집기에 성공했습니다 {width}' )
-        else :
-            print(f'집기에 실패했습니다. {width}')
-
+        # width = self.gripper.get_width()
+        # if width > 12 :
+        #     print(f'집기에 성공했습니다 {width}' )
+        # else :
+        #     print(f'집기에 실패했습니다. {width}')
+        # print('pick5')
+                
+    def save_data(self, record):
+        """
+        [수정] 실시간으로 CSV 파일에 데이터를 한 줄씩 추가합니다.
+        저장 항목: 1.객체인식 성공여부, 2.인식 시간, 3.정확도, 4.파지 성공여부, 5.동작 시간
+        """
+        csv_filename = 'pot_pick_data.csv'
+        file_exists = os.path.isfile(csv_filename)
         
+        try:
+            # 'a' 모드로 열어서 데이터를 끝에 추가 (Append)
+            with open(csv_filename, 'a', newline='') as f:
+                writer = csv.writer(f)
+                
+                # 파일이 없거나 비어있으면 헤더(제목)부터 작성
+                if not file_exists or os.stat(csv_filename).st_size == 0:
+                    writer.writerow([
+                        'Trial', 
+                        'Detect_Success',   # 1. 객체인식 성공여부
+                        'Detect_Time',      # 2. 인식까지 걸린 시간
+                        'Confidence',       # 3. 인식 정확도
+                        'Grasp_Success',    # 4. 파지 성공여부
+                        'Motion_Time',      # 5. 파지 동작시작~파지 시간
+                        'Grip_Width'        # (참고용) 그리퍼 너비
+                    ])
+                    
+                # 데이터 작성
+                writer.writerow([
+                    record['trial'],
+                    1,                      # Detect_Success (여기까지 왔으면 무조건 성공)
+                    record['detect_time'],  # Detect_Time
+                    record['conf'],         # Confidence
+                    record['success'],      # Grasp_Success
+                    record['motion_time'],  # Motion_Time
+                    record['width']         # Grip_Width
+                ])
+                f.flush() # 버퍼 강제 비우기 (즉시 저장)
+                os.fsync(f.fileno()) # OS 레벨 저장 동기화
+                
+            print(f">>> [저장 완료] Trial {record['trial']} 기록됨 (성공:{record['success']}, 시간:{record['detect_time']:.1f}s+{record['motion_time']:.1f}s)")
+            
+        except Exception as e:
+            print(f">>> [저장 실패] CSV 쓰기 오류: {e}")
 
     # ---- main loop ----
     def step(self):
         rclpy.spin_once(self.img_node, timeout_sec=0.0)
+
+        # [Time] 시도 시작
+        if not hasattr(self, 'trial_start_t') or self.trial_start_t is None:
+            self.trial_start_t = time.monotonic()
+        
+        # [Safety] 초기화
+        if not hasattr(self, 'fail_dir'):
+            self.fail_dir = "fail_images"
+            os.makedirs(self.fail_dir, exist_ok=True)
+        if not hasattr(self, 'last_fail_save_t'):
+            self.last_fail_save_t = None
 
         img = self.img_node.get_color_frame()
         depth = self.img_node.get_depth_frame()
         if img is None or depth is None:
             return None
 
-        # ✅ (수정) handle_mask를 받아옴
-        handle_mask, grip_pt, root_pt, direction, vis = self.detect_handle(img)
+        # 1. 객체 인식
+        handle_mask, grip_pt, root_pt, direction, conf, vis = self.detect_handle(img)
 
         now = time.monotonic()
         seen = (direction is not None and grip_pt is not None)
+        elapsed_time = now - self.trial_start_t 
 
+        # [Timeout] 3초 Blind Pick 로직
+        VISION_TIMEOUT = 3.0
+        is_blind_run = False
+        
         if not seen:
-            if self.last_seen_t is not None and (now - self.last_seen_t) > MAX_GAP_SEC:
-                self.hold_start_t = None
-                self.last_seen_t = None
-            return vis
+            if elapsed_time > VISION_TIMEOUT:
+                print(f">>> [Vision Timeout] 3초 경과! Blind Pick 모드로 진입합니다.")
+                grip_pt = (320, 240) 
+                root_pt = (320, 300)
+                direction = np.array([0.0, -1.0])
+                conf = 0.0
+                handle_mask = None
+                is_blind_run = True
+                
+                timestamp = time.strftime("%Y%m%d_%H%M%S")
+                try:
+                    cv2.imwrite(f"{self.fail_dir}/blind_run_{timestamp}.jpg", img)
+                except: pass
+            else:
+                if self.last_seen_t is not None and (now - self.last_seen_t) > MAX_GAP_SEC:
+                    self.hold_start_t = None
+                    self.last_seen_t = None
+                
+                remain = VISION_TIMEOUT - elapsed_time
+                cv2.putText(vis, f"Searching... {remain:.1f}s", (10, 60),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                return vis
 
         if self.last_seen_t is None or (now - self.last_seen_t) > MAX_GAP_SEC:
             self.hold_start_t = now
         self.last_seen_t = now
 
         held = now - (self.hold_start_t or now)
-        cv2.putText(vis, f"handle hold={held:.2f}s", (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-
-        if held < DETECT_HOLD_SEC:
+        if not is_blind_run and held < DETECT_HOLD_SEC:
             return vis
 
-        # ---- TRIGGER ----
+        # ---- 동작 시작 ----
+        detect_end_t = time.monotonic()
+        detect_duration = detect_end_t - self.trial_start_t 
+
         self.hold_start_t = None
         self.last_seen_t = None
 
-        gx, gy = int(grip_pt[0]), int(grip_pt[1])
-
-        # ✅ (수정) GRIP 한 점 depth가 아니라 handle 마스크 ROI에서 robust하게 depth 추출
-        z_mm = self.depth_from_handle_roi(gx, gy, depth, handle_mask, r=12)
+        if is_blind_run:
+             z_mm = 400.0 
+             gx, gy = int(grip_pt[0]), int(grip_pt[1]) 
+             print(f">>> [Blind] 깊이 정보가 없어 기본값({z_mm}mm)을 사용합니다.")
+        else:
+            gx, gy = int(grip_pt[0]), int(grip_pt[1])
+            z_mm = self.depth_from_handle_roi(gx, gy, depth, handle_mask, r=12)
+        
         if z_mm is None:
-            self.get_logger().warn("Depth invalid in HANDLE ROI near GRIP. Skipping.")
+            self.get_logger().warn("Depth invalid. Skipping.")
             return vis
 
-        # (선택) 화면에 depth 표시
-        cv2.putText(vis, f"z={z_mm:.1f}mm", (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-        # Cache robot pose BEFORE rotating J6 (for consistent base->cam)
+        motion_start_t = time.monotonic()
+        
         posx_before = get_current_posx()[0]
-
         cam_pos = self.get_camera_pos(gx, gy, z_mm)
         base_xyz = self.transform_to_base(cam_pos, posx_before=posx_before)
-
         total_delta_deg = self.compute_total_j6_delta_deg(direction)
 
-        self.get_logger().info(
-            f"TRIGGER: held {held:.2f}s | GRIP px=({gx},{gy}) depth={z_mm:.1f} -> base={base_xyz} | J6_delta={total_delta_deg:+.1f}deg"
-        )
-
-        # Rotate J6 WITHOUT re-detecting GRIP afterwards
         self.rotate_j6_openloop(total_delta_deg)
+        
+        # [Pick] 가서 집고 들어올림
+        self.pick_sequence(base_xyz) 
+        
+        motion_end_t = time.monotonic()
+        motion_duration = motion_end_t - motion_start_t 
 
-        # Optional sanity-check: only verify direction, not re-pick GRIP
-        if VERIFY_AFTER_ROTATION:
-            rclpy.spin_once(self.img_node, timeout_sec=0.0)
-            img2 = self.img_node.get_color_frame()
-            if img2 is not None:
-                _, _, _, dir2, _ = self.detect_handle(img2)
-                if dir2 is not None:
-                    dx, dy = float(dir2[0]), float(dir2[1])
-                    ang = math.degrees(math.atan2(dy, dx))
-                    self.get_logger().info(f"Verify: direction angle after rot = {ang:.1f} deg (target -90 deg for UP).")
-                else:
-                    self.get_logger().warn("Verify: handle not detected after rotation (ignored).")
+        # -------------------------------------------------------------
+        # [측정 및 놓기]
+        # -------------------------------------------------------------
+        width = float(self.gripper.get_width()) 
+        is_success = 1 if width > 12 else 0 
+        
+        print(f">>> [동작 완료] Width:{width:.2f}mm 측정됨. 냄비를 놓아줍니다.")
+        self.gripper.open_gripper()
+        wait(0.5) 
+        
+        # -------------------------------------------------------------
+        # [NEW] 원점 복귀(Place) 시간 측정
+        # -------------------------------------------------------------
+        place_start_t = time.monotonic()
+        
+        # 원점 위치 (기존 reset_robot_position에 있던 좌표)
+        J_align = [-90.962, 2.308, 56.362, -1.586, 92.434, 88.283]
+        movej(J_align, vel=VELOCITY, acc=ACC)
+        wait(0.5)
+        
+        place_end_t = time.monotonic()
+        place_duration = place_end_t - place_start_t
+        # -------------------------------------------------------------
 
-        # Execute pick with cached base_xyz
-        self.pick_sequence(base_xyz)
+        # 결과 기록 (place_ms 추가)
+        if not hasattr(self, 'history'): self.history = []
+        
+        record = {
+            'trial': len(self.history) + 1,
+            'success': is_success,          
+            'detect_ms': detect_duration * 1000.0,
+            'motion_ms': motion_duration * 1000.0,
+            'place_ms':  place_duration * 1000.0,   # [추가] 복귀 시간
+            'conf': float(conf),            
+            'width': width,
+            'detect_success': 0 if is_blind_run else 1
+        }
+        self.history.append(record)
+        self.save_data_custom(record)
 
-        self.done_once = True
-
+        # 다음 시도 준비
+        TARGET_TRIALS = 100
+        if len(self.history) < TARGET_TRIALS:
+            print(">>> Resetting Variables...")
+            # 변수 초기화
+            self.trial_start_t = time.monotonic() 
+            self.hold_start_t = None
+            self.last_seen_t = None
+            self.done_once = False 
+        else:
+            print(f">>> {TARGET_TRIALS} Trials Completed!")
+            self.done_once = True
+            
         return vis
 
+    # ---- [Helper] 리셋 및 초기화 함수 ----
+    def reset_robot_position(self):
+        TARGET_TRIALS = 100
+        if len(self.history) < TARGET_TRIALS:
+            print(">>> Resetting Robot...")
+            self.gripper.open_gripper()
+            wait(0.5)
+            # 초기 위치로 이동 (팔을 뺐다가 다시 오게 함)
+            # J_align은 main이나 전역변수에서 가져옴
+            J_align = [-90.962, 2.308, 56.362, -1.586, 92.434, 88.283]
+            movej(J_align, vel=VELOCITY, acc=ACC)
+            wait(0.5)
+            
+            # 다음 시도를 위해 시간 초기화
+            self.trial_start_t = time.monotonic() 
+            self.hold_start_t = None
+            self.last_seen_t = None
+            self.done_once = False 
+        else:
+            print(f">>> {TARGET_TRIALS} Trials Completed!")
+            self.done_once = True
+
+    # ---- [Helper] 데이터 저장 함수 (단위: ms) ----
+    def save_data_custom(self, record):
+        csv_filename = 'pot_pick_data.csv'
+        file_exists = os.path.isfile(csv_filename)
+        try:
+            with open(csv_filename, 'a', newline='') as f:
+                writer = csv.writer(f)
+                # 헤더에 단위 명시 (ms)
+                if not file_exists or os.stat(csv_filename).st_size == 0:
+                    writer.writerow(['Trial', 'Detect_Success', 'Detect_Time(ms)', 'Confidence', 'Grasp_Success', 'Motion_Time(ms)', 'Grip_Width'])
+                
+                writer.writerow([
+                    record['trial'],
+                    record.get('detect_success', 0), 
+                    f"{record['detect_ms']:.2f}",   # 밀리초 단위이므로 소수점 2자리만 해도 충분 (예: 53.42 ms)
+                    f"{record['conf']:.4f}",        
+                    record['success'],
+                    f"{record['motion_ms']:.2f}",   # 예: 2100.50 ms
+                    f"{record['width']:.4f}"        # 너비는 정밀하게 4자리
+                ])
+                f.flush()
+                os.fsync(f.fileno())
+            
+            print(f">>> [기록] Trial {record['trial']} | Time: {record['detect_ms']:.1f}ms + {record['motion_ms']:.1f}ms | Width: {record['width']:.2f}")
+        except Exception as e:
+            print(f">>> [에러] CSV 저장 실패: {e}")
 
 if __name__ == "__main__":
     rclpy.init()
@@ -535,35 +714,48 @@ if __name__ == "__main__":
 
     app = PotHandlePickNode()
 
-    J_align = [-90.962, 2.308, 56.362, -1.586, 92.434, 88.283]  # 원하는 초기 조인트각(도)로 바꾸세요
+    # 1. 초기 위치 이동 (시작 전 한 번만 수행)
+    J_align = [-90.962, 2.308, 56.362, -1.586, 92.434, 88.283]  
     movej(J_align, vel=VELOCITY, acc=ACC)
     wait(0.5)
 
-
-    timeout = float(os.environ.get('KITCHEN_DETECT_TIMEOUT_SEC', '12.0'))
-    t0 = time.monotonic()
+    # --------------------------------------------------------------------------
+    # [수정] Timeout 관련 변수 제거
+    # 원래 있던 t0, timeout 로직은 1회성 실행을 위한 것이므로 100회 반복 시에는 방해가 됩니다.
+    # --------------------------------------------------------------------------
+    # timeout = float(os.environ.get('KITCHEN_DETECT_TIMEOUT_SEC', '12.0')) 
+    # t0 = time.monotonic() 
     obj_name = globals().get('TARGET_NAME', 'object')
 
-    while True:
-        if (time.monotonic() - t0) > timeout and not getattr(app, "done_once", False):
-            print(f"[TIMEOUT] {obj_name} not detected for {timeout:.1f}s")
-            try:
-                cv2.destroyAllWindows()
-            except Exception:
-                pass
-            try:
-                rclpy.shutdown()
-            except Exception:
-                pass
-            sys.exit(2)
+    print(">>> 100회 반복 테스트를 시작합니다. (Press ESC to stop manually)")
 
+    while True:
+        # [수정] 타임아웃 체크 로직 주석 처리 (이게 살아있으면 12초 뒤에 꺼짐)
+        # if (time.monotonic() - t0) > timeout and not getattr(app, "done_once", False):
+        #     print(f"[TIMEOUT] {obj_name} not detected for {timeout:.1f}s")
+        #     ... (종료 코드) ...
+        #     sys.exit(2)
+
+        # 2. step() 반복 호출
+        # step() 내부에서 100회 미만일 때는 app.done_once = False를 유지하므로
+        # 이 while 루프는 계속 돕니다.
         frame = app.step()
+
+        # 3. 100회 완료 후 종료 조건
+        # step() 내부에서 100회가 끝나면 app.done_once = True로 바뀝니다.
         if app.done_once:
+            print(">>> 모든 테스트가 완료되었습니다. 프로그램을 종료합니다.")
             break
+
         if frame is not None:
             cv2.imshow("PotHandle", frame)
+        
         key = cv2.waitKey(1) & 0xFF
-        if key == 27:  # ESC
+        if key == 27:  # ESC 키를 누르면 강제 종료
+            print(">>> 사용자에 의해 강제 종료되었습니다.")
+            # 강제 종료 시에도 현재까지의 데이터 저장 시도 (선택 사항)
+            if hasattr(app, 'save_plot'):
+                app.save_plot() 
             break
 
     cv2.destroyAllWindows()
